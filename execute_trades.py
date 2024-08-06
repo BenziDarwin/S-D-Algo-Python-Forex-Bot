@@ -1,29 +1,40 @@
-import MetaTrader5 as mt5
-
-def open_sell_positions(symbol, supply_zones, max_positions=5):
-    if not mt5.initialize():
-        print("initialize() failed")
-        mt5.shutdown()
-        return
-
+def open_sell_positions(mt5, symbol, supply_zones, max_positions=5):
     # Ensure only up to max_positions are open
-    open_positions = [pos for pos in mt5.positions_get() if pos.symbol == symbol]
+    open_positions = [pos for pos in mt5.positions_get(symbol=symbol) if pos.symbol == symbol and pos.type == mt5.ORDER_TYPE_SELL]
     if len(open_positions) >= max_positions:
         print(f"Maximum of {max_positions} positions already open.")
         mt5.shutdown()
         return
 
-    # Open a sell position at each supply zone if not already opened
-    for date,price in supply_zones:
-        if not any(pos.symbol == symbol and pos.type == mt5.ORDER_SELL for pos in open_positions):
-            # Create and send a sell order
+    # Use only the most recent supply zone
+    if supply_zones:
+        date, price = supply_zones[-1]
+        if not any(pos.price_open == price for pos in open_positions):
+            point = mt5.symbol_info(symbol).point  # Get point value
+            bid_price = mt5.symbol_info_tick(symbol).bid  # Use current bid price for sell
+            sl_price = bid_price + 50 * point  # Example SL
+            tp_price = bid_price - 50 * point  # Example TP
+
+            # Check if there are enough funds for this trade
+            account_info = mt5.account_info()
+            if account_info is None:
+                print("Failed to get account info.")
+                mt5.shutdown()
+                return
+
+            margin_needed = mt5.order_calc_margin(mt5.ORDER_TYPE_SELL, symbol, 0.01, bid_price)
+            if margin_needed is None or account_info.margin_free < margin_needed:
+                print("Not enough money to open sell order.")
+                return
+
             request = {
-                "action": mt5.ORDER_BUY,  # Fixed to ORDER_SELL for selling
+                "action": mt5.TRADE_ACTION_DEAL,
                 "symbol": symbol,
-                "volume": 0.1,  # Adjust volume as needed
-                "price": price,
-                "sl": price + 50 * mt5.symbol_info(symbol).point,  # Example SL
-                "tp": price - 50 * mt5.symbol_info(symbol).point,  # Example TP
+                "volume": 0.01,  # Adjust volume as needed
+                "type": mt5.ORDER_TYPE_SELL,
+                "price": bid_price,
+                "sl": sl_price,
+                "tp": tp_price,
                 "deviation": 10,
                 "magic": 234000,
                 "comment": "Sell order",
@@ -36,35 +47,48 @@ def open_sell_positions(symbol, supply_zones, max_positions=5):
 
     # Close profitable positions
     for pos in open_positions:
-        if pos.type == mt5.ORDER_SELL and is_profitable(pos):
-            close_position(pos)
+        if is_profitable(mt5, pos):
+            close_position(mt5, pos)
 
     mt5.shutdown()
 
-def open_buy_positions(symbol, demand_zones, max_positions=5):
-    if not mt5.initialize():
-        print("initialize() failed")
-        mt5.shutdown()
-        return
-
+def open_buy_positions(mt5, symbol, demand_zones, max_positions=5):
     # Ensure only up to max_positions are open
-    open_positions = [pos for pos in mt5.positions_get() if pos.symbol == symbol]
+    open_positions = [pos for pos in mt5.positions_get(symbol=symbol) if pos.symbol == symbol and pos.type == mt5.ORDER_TYPE_BUY]
     if len(open_positions) >= max_positions:
         print(f"Maximum of {max_positions} positions already open.")
         mt5.shutdown()
         return
 
-    # Open a buy position at each demand zone if not already opened
-    for date,price in demand_zones:
-        if not any(pos.symbol == symbol and pos.type == mt5.ORDER_BUY for pos in open_positions):
-            # Create and send a buy order
+    # Use only the most recent demand zone
+    if demand_zones:
+        date, price = demand_zones[-1]
+        if not any(pos.price_open == price for pos in open_positions):
+            point = mt5.symbol_info(symbol).point  # Get point value
+            ask_price = mt5.symbol_info_tick(symbol).ask  # Use current ask price for buy
+            sl_price = ask_price - 50 * point  # Example SL
+            tp_price = ask_price + 50 * point  # Example TP
+
+            # Check if there are enough funds for this trade
+            account_info = mt5.account_info()
+            if account_info is None:
+                print("Failed to get account info.")
+                mt5.shutdown()
+                return
+
+            margin_needed = mt5.order_calc_margin(mt5.ORDER_TYPE_BUY, symbol, 0.01, ask_price)
+            if margin_needed is None or account_info.margin_free < margin_needed:
+                print("Not enough money to open buy order.")
+                return
+
             request = {
-                "action": mt5.ORDER_SELL,  # Fixed to ORDER_BUY for buying
+                "action": mt5.TRADE_ACTION_DEAL,
                 "symbol": symbol,
-                "volume": 0.1,  # Adjust volume as needed
-                "price": price,
-                "sl": price - 50 * mt5.symbol_info(symbol).point,  # Example SL
-                "tp": price + 50 * mt5.symbol_info(symbol).point,  # Example TP
+                "volume": 0.01,  # Adjust volume as needed
+                "type": mt5.ORDER_TYPE_BUY,
+                "price": ask_price,
+                "sl": sl_price,
+                "tp": tp_price,
                 "deviation": 10,
                 "magic": 234000,
                 "comment": "Buy order",
@@ -77,40 +101,36 @@ def open_buy_positions(symbol, demand_zones, max_positions=5):
 
     # Close profitable positions
     for pos in open_positions:
-        if pos.type == mt5.ORDER_BUY and is_profitable(pos):
-            close_position(pos)
+        if is_profitable(mt5, pos):
+            close_position(mt5, pos)
 
     mt5.shutdown()
 
-def is_profitable(position):
+def is_profitable(mt5, position):
     symbol = position.symbol
     entry_price = position.price_open
     volume = position.volume
-    # Get the current market price
     tick = mt5.symbol_info_tick(symbol)
     if tick is None:
         print(f"Failed to get tick data for {symbol}")
         return False
     
-    # Current price based on position type
-    current_price = tick.bid if position.type == mt5.ORDER_BUY else tick.ask
-    
-    # Calculate profit
+    current_price = tick.bid if position.type == mt5.ORDER_TYPE_BUY else tick.ask
     point = mt5.symbol_info(symbol).point
-    profit = (current_price - entry_price) * volume / point if position.type == mt5.ORDER_BUY else (entry_price - current_price) * volume / point
-    
-    # Check if profit is greater than 0
+    profit = (current_price - entry_price) * volume / point if position.type == mt5.ORDER_TYPE_BUY else (entry_price - current_price) * volume / point
     return profit > 0
 
-def close_position(position):
-    # Close the given position
+def close_position(mt5, position):
+    price = mt5.symbol_info_tick(position.symbol).bid if position.type == mt5.ORDER_TYPE_BUY else mt5.symbol_info_tick(position.symbol).ask
     request = {
-        "action": mt5.ORDER_CLOSE,  # Correct action for closing
+        "action": mt5.TRADE_ACTION_DEAL,
         "symbol": position.symbol,
         "volume": position.volume,
-        "price": mt5.symbol_info_tick(position.symbol).bid if position.type == mt5.ORDER_BUY else mt5.symbol_info_tick(position.symbol).ask,
+        "type": mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY,
+        "position": position.ticket,
+        "price": price,
         "deviation": 10,
-        "magic": position.magic,
+        "magic": 234000,
         "comment": "Closing profitable position",
         "type_time": mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_IOC
@@ -118,4 +138,3 @@ def close_position(position):
     result = mt5.order_send(request)
     if result.retcode != mt5.TRADE_RETCODE_DONE:
         print(f"Failed to close position. Retcode: {result.retcode}")
-
