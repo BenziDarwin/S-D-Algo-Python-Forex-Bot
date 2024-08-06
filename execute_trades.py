@@ -1,9 +1,7 @@
 def open_sell_positions(mt5, symbol, supply_zones, max_positions=5):
-    # Ensure only up to max_positions are open
-    open_positions = [pos for pos in mt5.positions_get(symbol=symbol) if pos.symbol == symbol and pos.type == mt5.ORDER_TYPE_SELL]
+    open_positions = [pos for pos in list(mt5.positions_get(symbol=symbol)) if pos.type == mt5.ORDER_TYPE_SELL]
     if len(open_positions) >= max_positions:
         print(f"Maximum of {max_positions} positions already open.")
-        mt5.shutdown()
         return
 
     # Use only the most recent supply zone
@@ -19,7 +17,6 @@ def open_sell_positions(mt5, symbol, supply_zones, max_positions=5):
             account_info = mt5.account_info()
             if account_info is None:
                 print("Failed to get account info.")
-                mt5.shutdown()
                 return
 
             margin_needed = mt5.order_calc_margin(mt5.ORDER_TYPE_SELL, symbol, 0.01, bid_price)
@@ -50,14 +47,12 @@ def open_sell_positions(mt5, symbol, supply_zones, max_positions=5):
         if is_profitable(mt5, pos):
             close_position(mt5, pos)
 
-    mt5.shutdown()
 
 def open_buy_positions(mt5, symbol, demand_zones, max_positions=5):
     # Ensure only up to max_positions are open
-    open_positions = [pos for pos in mt5.positions_get(symbol=symbol) if pos.symbol == symbol and pos.type == mt5.ORDER_TYPE_BUY]
+    open_positions = [pos for pos in list(mt5.positions_get(symbol=symbol)) if pos.type == mt5.ORDER_TYPE_BUY]
     if len(open_positions) >= max_positions:
         print(f"Maximum of {max_positions} positions already open.")
-        mt5.shutdown()
         return
 
     # Use only the most recent demand zone
@@ -73,7 +68,6 @@ def open_buy_positions(mt5, symbol, demand_zones, max_positions=5):
             account_info = mt5.account_info()
             if account_info is None:
                 print("Failed to get account info.")
-                mt5.shutdown()
                 return
 
             margin_needed = mt5.order_calc_margin(mt5.ORDER_TYPE_BUY, symbol, 0.01, ask_price)
@@ -103,8 +97,6 @@ def open_buy_positions(mt5, symbol, demand_zones, max_positions=5):
     for pos in open_positions:
         if is_profitable(mt5, pos):
             close_position(mt5, pos)
-
-    mt5.shutdown()
 
 def is_profitable(mt5, position):
     symbol = position.symbol
