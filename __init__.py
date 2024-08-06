@@ -8,6 +8,9 @@ from mock_execute_trades import mock_open_sell_positions, mock_open_buy_position
 
 MODE = 'live'
 
+def is_valid_time():
+    now = datetime.now()
+    return now.minute % 30 == 0
 
 def main():
     if not mt5.initialize():
@@ -29,39 +32,39 @@ def main():
     print(f"Connected to account #{account}")
 
     # Set the symbol and timeframe
-    symbol = "XAUUSDm"
-    timeframe = mt5.TIMEFRAME_M5  # Hourly data
+    symbol = "EURUSDm"
+    timeframe = mt5.TIMEFRAME_M30  # Hourly data
 
 
     if MODE == 'live':
         try:
             while True:
-                
-                # Define the time range for fetching historical data
-                end_date = pd.Timestamp.now()
-                start_date = end_date - pd.DateOffset(days=30)  # Adjust as needed
+                if is_valid_time():
+                    # Define the time range for fetching historical data
+                    end_date = pd.Timestamp.now()
+                    start_date = end_date - pd.DateOffset(days=30)  # Adjust as needed
 
-                # Fetch historical data
-                rates = mt5.copy_rates_range(symbol, timeframe, start_date.to_pydatetime(), end_date.to_pydatetime())
-                if rates is None:
-                    print(f"Failed to get rates for {symbol}, error code: {mt5.last_error()}")
-                    time.sleep(300)  # Wait before retrying
-                    continue
+                    # Fetch historical data
+                    rates = mt5.copy_rates_range(symbol, timeframe, start_date.to_pydatetime(), end_date.to_pydatetime())
+                    if rates is None:
+                        print(f"Failed to get rates for {symbol}, error code: {mt5.last_error()}")
+                        time.sleep(300)  # Wait before retrying
+                        continue
 
-                # Create DataFrame
-                df = pd.DataFrame(rates)
-                df['time'] = pd.to_datetime(df['time'], unit='s')
-                df.set_index('time', inplace=True)
+                    # Create DataFrame
+                    df = pd.DataFrame(rates)
+                    df['time'] = pd.to_datetime(df['time'], unit='s')
+                    df.set_index('time', inplace=True)
 
-                # Find supply and demand zones
-                supply_zones, demand_zones = find_zones(df)
+                    # Find supply and demand zones
+                    supply_zones, demand_zones = find_zones(df)
 
-                # Execute live trades
-                open_sell_positions(mt5, symbol, supply_zones)
-                open_buy_positions(mt5, symbol, demand_zones)
+                    # Execute live trades
+                    open_sell_positions(mt5, symbol, supply_zones)
+                    open_buy_positions(mt5, symbol, demand_zones)
             
                 # Wait for 1 second before checking again
-                time.sleep(10)
+                time.sleep(100)
         finally:
             mt5.shutdown()
     elif MODE == 'mock':
