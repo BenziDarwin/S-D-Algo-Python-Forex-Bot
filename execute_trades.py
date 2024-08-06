@@ -10,8 +10,8 @@ def open_sell_positions(mt5, symbol, supply_zones, max_positions=5):
         if not any(pos.price_open == price for pos in open_positions):
             point = mt5.symbol_info(symbol).point  # Get point value
             bid_price = mt5.symbol_info_tick(symbol).bid  # Use current bid price for sell
-            sl_price = bid_price + 100 * point  # Example SL
-            tp_price = bid_price - 100 * point  # Example TP
+            sl_price = bid_price + 1000 * point  # Example SL
+            tp_price = bid_price - 1500 * point  # Example TP
 
             # Check if there are enough funds for this trade
             account_info = mt5.account_info()
@@ -40,7 +40,7 @@ def open_sell_positions(mt5, symbol, supply_zones, max_positions=5):
             }
             result = mt5.order_send(request)
             if result.retcode != mt5.TRADE_RETCODE_DONE:
-                print(f"Failed to open sell order. Retcode: {result.retcode}")
+                print(f"Failed to open sell order. Retcode: {result}")
 
     # Close profitable positions
     for pos in open_positions:
@@ -61,8 +61,8 @@ def open_buy_positions(mt5, symbol, demand_zones, max_positions=5):
         if not any(pos.price_open == price for pos in open_positions):
             point = mt5.symbol_info(symbol).point  # Get point value
             ask_price = mt5.symbol_info_tick(symbol).ask  # Use current ask price for buy
-            sl_price = ask_price - 100 * point  # Example SL
-            tp_price = ask_price + 100 * point  # Example TP
+            sl_price = ask_price - 1000 * point  # Example SL
+            tp_price = ask_price + 1500 * point  # Example TP
 
             # Check if there are enough funds for this trade
             account_info = mt5.account_info()
@@ -91,7 +91,7 @@ def open_buy_positions(mt5, symbol, demand_zones, max_positions=5):
             }
             result = mt5.order_send(request)
             if result.retcode != mt5.TRADE_RETCODE_DONE:
-                print(f"Failed to open buy order. Retcode: {result.retcode}")
+                print(f"Failed to open buy order. Retcode: {result}")
 
     # Close profitable positions
     for pos in open_positions:
