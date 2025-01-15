@@ -41,6 +41,7 @@ def open_sell_positions(mt5, symbol, supply_zones, max_positions=5):
             result = mt5.order_send(request)
             if result.retcode != mt5.TRADE_RETCODE_DONE:
                 print(f"Failed to open sell order. Retcode: {result.retcode}")
+            print(f"Opened sell order at {bid_price}")
 
     # Close profitable positions
     for pos in open_positions:
@@ -92,6 +93,7 @@ def open_buy_positions(mt5, symbol, demand_zones, max_positions=5):
             result = mt5.order_send(request)
             if result.retcode != mt5.TRADE_RETCODE_DONE:
                 print(f"Failed to open buy order. Retcode: {result.retcode}")
+            print(f"Opened buy order at {ask_price}")
 
     # Close profitable positions
     for pos in open_positions:
