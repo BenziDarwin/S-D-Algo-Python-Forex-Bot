@@ -6,12 +6,14 @@ def open_sell_positions(mt5, symbol, supply_zones, max_positions=5):
 
     # Use only the most recent supply zone
     if supply_zones:
-        date, price = supply_zones[-1]
-        if not any(pos.price_open == price for pos in open_positions):
-            point = mt5.symbol_info(symbol).point  # Get point value
-            bid_price = mt5.symbol_info_tick(symbol).bid  # Use current bid price for sell
-            sl_price = bid_price + 100 * point  # Example SL
-            tp_price = bid_price - 100 * point  # Example TP
+        date, zone_price = supply_zones[-1]
+        bid_price = mt5.symbol_info_tick(symbol).bid
+
+        # Only open position if current bid is HIGHER than the supply zone price
+        if bid_price > zone_price and not any(pos.price_open == bid_price for pos in open_positions):
+            point = mt5.symbol_info(symbol).point
+            sl_price = bid_price + 100 * point
+            tp_price = bid_price - 100 * point
 
             # Check if there are enough funds for this trade
             account_info = mt5.account_info()
@@ -27,7 +29,7 @@ def open_sell_positions(mt5, symbol, supply_zones, max_positions=5):
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
                 "symbol": symbol,
-                "volume": 0.01,  # Adjust volume as needed
+                "volume": 0.01,
                 "type": mt5.ORDER_TYPE_SELL,
                 "price": bid_price,
                 "sl": sl_price,
@@ -41,16 +43,12 @@ def open_sell_positions(mt5, symbol, supply_zones, max_positions=5):
             result = mt5.order_send(request)
             if result.retcode != mt5.TRADE_RETCODE_DONE:
                 print(f"Failed to open sell order. Retcode: {result.retcode}")
-            print(f"Opened sell order at {bid_price}")
-
-    # Close profitable positions
-    for pos in open_positions:
-        if is_profitable(mt5, pos):
-            close_position(mt5, pos)
-
+            else:
+                print(f"Opened sell order at {bid_price} (Price entered supply zone at {zone_price})")
+        else:
+            print(f"Waiting for bid ({bid_price}) to enter supply zone ({zone_price})")
 
 def open_buy_positions(mt5, symbol, demand_zones, max_positions=5):
-    # Ensure only up to max_positions are open
     open_positions = [pos for pos in list(mt5.positions_get(symbol=symbol)) if pos.type == mt5.ORDER_TYPE_BUY]
     if len(open_positions) >= max_positions:
         print(f"Maximum of {max_positions} positions already open.")
@@ -58,12 +56,14 @@ def open_buy_positions(mt5, symbol, demand_zones, max_positions=5):
 
     # Use only the most recent demand zone
     if demand_zones:
-        date, price = demand_zones[-1]
-        if not any(pos.price_open == price for pos in open_positions):
-            point = mt5.symbol_info(symbol).point  # Get point value
-            ask_price = mt5.symbol_info_tick(symbol).ask  # Use current ask price for buy
-            sl_price = ask_price - 100 * point  # Example SL
-            tp_price = ask_price + 100 * point  # Example TP
+        date, zone_price = demand_zones[-1]
+        ask_price = mt5.symbol_info_tick(symbol).ask
+
+        # Only open position if current ask is LOWER than the demand zone price
+        if ask_price < zone_price and not any(pos.price_open == ask_price for pos in open_positions):
+            point = mt5.symbol_info(symbol).point
+            sl_price = ask_price - 100 * point
+            tp_price = ask_price + 100 * point
 
             # Check if there are enough funds for this trade
             account_info = mt5.account_info()
@@ -79,7 +79,7 @@ def open_buy_positions(mt5, symbol, demand_zones, max_positions=5):
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
                 "symbol": symbol,
-                "volume": 0.01,  # Adjust volume as needed
+                "volume": 0.01,
                 "type": mt5.ORDER_TYPE_BUY,
                 "price": ask_price,
                 "sl": sl_price,
@@ -93,13 +93,11 @@ def open_buy_positions(mt5, symbol, demand_zones, max_positions=5):
             result = mt5.order_send(request)
             if result.retcode != mt5.TRADE_RETCODE_DONE:
                 print(f"Failed to open buy order. Retcode: {result.retcode}")
-            print(f"Opened buy order at {ask_price}")
-
-    # Close profitable positions
-    for pos in open_positions:
-        if is_profitable(mt5, pos):
-            close_position(mt5, pos)
-
+            else:
+                print(f"Opened buy order at {ask_price} (Price entered demand zone at {zone_price})")
+        else:
+            print(f"Waiting for ask ({ask_price}) to enter demand zone ({zone_price})")
+                        
 def is_profitable(mt5, position):
     symbol = position.symbol
     entry_price = position.price_open
