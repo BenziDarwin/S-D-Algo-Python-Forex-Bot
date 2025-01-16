@@ -1,4 +1,3 @@
-from datetime import datetime
 import time
 import MetaTrader5 as mt5
 import pandas as pd
@@ -6,7 +5,7 @@ from zones import find_zones
 from execute_trades import open_sell_positions, open_buy_positions
 from mock_execute_trades import mock_open_sell_positions, mock_open_buy_positions
 
-MODE = 'mock'
+MODE = 'live'
 
 def main():
     if not mt5.initialize():
@@ -53,9 +52,6 @@ def main():
 
                 # Find supply and demand zones
                 supply_zones, demand_zones = find_zones(df)
-
-                print("Supply zones:", supply_zones)
-                print("Demand zones:", demand_zones)
 
                 print("Processing live data...")
 
