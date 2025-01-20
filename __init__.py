@@ -56,8 +56,8 @@ def main():
                 print("Processing live data...")
 
                 # Execute live trades
-                open_sell_positions(mt5, symbol, supply_zones, demand_zones)
-                open_buy_positions(mt5, symbol, supply_zones, demand_zones)
+                open_sell_positions(mt5, symbol, supply_zones)
+                open_buy_positions(mt5, symbol, demand_zones)
 
             
                 # Wait for 10 seconds before checking again

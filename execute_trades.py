@@ -30,16 +30,25 @@ def get_market_condition(mt5, symbol, period=15, lookback=20):
     df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
     df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
     
-    # Calculate RSI
+    # Calculate RSI with error handling
     delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
+    gains = delta.where(delta > 0, 0)
+    losses = -delta.where(delta < 0, 0)
+    
+    # Calculate average gains and losses
+    avg_gains = gains.rolling(window=14).mean()
+    avg_losses = losses.rolling(window=14).mean()
+    
+    # Calculate RS with handling for zero division
+    rs = avg_gains / avg_losses.replace(0, np.inf)
     df['rsi'] = 100 - (100 / (1 + rs))
+    
+    # Handle any potential NaN values
+    df['rsi'] = df['rsi'].fillna(50)
     
     # Calculate trend strength
     price_change = (df['close'].iloc[-1] - df['close'].iloc[0]) / df['close'].iloc[0] * 100
-    current_rsi = df['rsi'].iloc[-1]
+    current_rsi = float(df['rsi'].iloc[-1])  # Convert to float to avoid comparison issues
     
     # Strong trend thresholds
     STRONG_TREND_THRESHOLD = 0.5  # 0.5% price change
