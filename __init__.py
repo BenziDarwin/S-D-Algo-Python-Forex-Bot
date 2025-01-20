@@ -60,8 +60,8 @@ def main():
                 open_buy_positions(mt5, symbol, supply_zones, demand_zones)
 
             
-                # Wait for 1 second before checking again
-                time.sleep(60)
+                # Wait for 10 seconds before checking again
+                time.sleep(10)
         finally:
             mt5.shutdown()
     elif MODE == 'mock':
