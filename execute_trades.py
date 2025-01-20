@@ -87,8 +87,7 @@ def open_buy_positions(mt5, symbol, demand_zones, max_positions=5):
                 "deviation": 10,
                 "magic": 234000,
                 "comment": "Buy order",
-                "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_IOC
+                "type_time": mt5.ORDER_TIME_GTC
             }
             result = mt5.order_send(request)
             if result.retcode != mt5.TRADE_RETCODE_DONE:
@@ -124,8 +123,7 @@ def close_position(mt5, position):
         "deviation": 10,
         "magic": 234000,
         "comment": "Closing profitable position",
-        "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_IOC
+        "type_time": mt5.ORDER_TIME_GTC
     }
     result = mt5.order_send(request)
     if result.retcode != mt5.TRADE_RETCODE_DONE:
