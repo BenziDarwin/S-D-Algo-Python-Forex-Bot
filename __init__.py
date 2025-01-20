@@ -14,9 +14,9 @@ def main():
         return
         
     # Replace with your login credentials
-    account = 89001069
-    password = "Kj-2JwHe"
-    server = "MetaQuotes-Demo"
+    account = 48688301
+    password = "Homethe06!"
+    server = "HFMarketsGlobal-Demo"
 
     authorized = mt5.login(account, password=password, server=server)
     if not authorized:
