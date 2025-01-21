@@ -1,4 +1,18 @@
-def check_news_impact(mt5, symbol, impact_threshold_pips=50):
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Get configurable variables
+RISK_PERCENT = float(os.getenv('RISK_PERCENT'))
+SL_PIPS = int(os.getenv('SL_PIPS'))
+IMPACT_THRESHOLD_PIPS = int(os.getenv('IMPACT_THRESHOLD_PIPS'))
+STRONG_TREND_THRESHOLD = float(os.getenv('STRONG_TREND_THRESHOLD'))
+MAX_POSITIONS = int(os.getenv('MAX_POSITIONS'))
+MAGIC_NUMBER = int(os.getenv('MAGIC_NUMBER'))
+
+def check_news_impact(mt5, symbol, impact_threshold_pips=IMPACT_THRESHOLD_PIPS):
     """
     Check for unusual price movements that might indicate news impact
     """
@@ -50,9 +64,6 @@ def get_market_condition(mt5, symbol, period=15, lookback=20):
     price_change = (df['close'].iloc[-1] - df['close'].iloc[0]) / df['close'].iloc[0] * 100
     current_rsi = float(df['rsi'].iloc[-1])  # Convert to float to avoid comparison issues
     
-    # Strong trend thresholds
-    STRONG_TREND_THRESHOLD = 0.5  # 0.5% price change
-    
     if df['ema20'].iloc[-1] > df['ema50'].iloc[-1]:
         strength = abs(price_change) if price_change > 0 else 0
         if current_rsi > 70:
@@ -66,7 +77,7 @@ def get_market_condition(mt5, symbol, period=15, lookback=20):
     else:
         return "RANGING", 0
 
-def calculate_position_size(mt5, symbol, risk_percent=1.0, sl_pips=100):
+def calculate_position_size(mt5, symbol, risk_percent=RISK_PERCENT, sl_pips=SL_PIPS):
     """
     Calculate position size based on account risk management
     """
@@ -88,7 +99,7 @@ def calculate_position_size(mt5, symbol, risk_percent=1.0, sl_pips=100):
     position_size = round(max(position_size, 0.05), 2)
     return position_size
 
-def open_sell_positions(mt5, symbol, supply_zones, max_positions=5):
+def open_sell_positions(mt5, symbol, supply_zones, max_positions=MAX_POSITIONS):
     # Check for high volatility/news impact first
     if check_news_impact(mt5, symbol):
         print("High volatility detected - avoiding new positions")
@@ -111,9 +122,8 @@ def open_sell_positions(mt5, symbol, supply_zones, max_positions=5):
     
     # Determine if we should trade based on both trend and supply zones
     should_trade = False
-    zone_price = None
     
-    if market_condition == "BEARISH" and trend_strength > 0.4:
+    if market_condition == "BEARISH" and trend_strength > STRONG_TREND_THRESHOLD:
         # Strong bearish trend - we can trade even without supply zone
         should_trade = True
         zone_price = bid_price
@@ -131,7 +141,7 @@ def open_sell_positions(mt5, symbol, supply_zones, max_positions=5):
         tp_price = bid_price - (sl_pips * 1.3) * point  # 1.5 risk:reward ratio
         
         # Calculate position size based on risk management
-        volume = calculate_position_size(mt5, symbol, risk_percent=1.0, sl_pips=sl_pips)
+        volume = calculate_position_size(mt5, symbol, risk_percent=RISK_PERCENT, sl_pips=sl_pips)
 
         # Check if there are enough funds
         margin_needed = mt5.order_calc_margin(mt5.ORDER_TYPE_SELL, symbol, volume, bid_price)
@@ -161,7 +171,7 @@ def open_sell_positions(mt5, symbol, supply_zones, max_positions=5):
     else:
         print(f"Waiting for better sell conditions. Market: {market_condition}, Strength: {trend_strength:.2f}")
 
-def open_buy_positions(mt5, symbol, demand_zones, max_positions=5):
+def open_buy_positions(mt5, symbol, demand_zones, max_positions=MAX_POSITIONS):
     # Check for high volatility/news impact first
     if check_news_impact(mt5, symbol):
         print("High volatility detected - avoiding new positions")
@@ -186,7 +196,7 @@ def open_buy_positions(mt5, symbol, demand_zones, max_positions=5):
     should_trade = False
     zone_price = None
     
-    if market_condition == "BULLISH" and trend_strength > 0.4:
+    if market_condition == "BULLISH" and trend_strength > STRONG_TREND_THRESHOLD:
         # Strong bullish trend - we can trade even without demand zone
         should_trade = True
         zone_price = ask_price
@@ -204,7 +214,7 @@ def open_buy_positions(mt5, symbol, demand_zones, max_positions=5):
         tp_price = ask_price + (sl_pips * 1.3) * point  # 1.5 risk:reward ratio
         
         # Calculate position size based on risk management
-        volume = calculate_position_size(mt5, symbol, risk_percent=1.0, sl_pips=sl_pips)
+        volume = calculate_position_size(mt5, symbol, risk_percent=RISK_PERCENT, sl_pips=sl_pips)
 
         # Check if there are enough funds
         margin_needed = mt5.order_calc_margin(mt5.ORDER_TYPE_BUY, symbol, volume, ask_price)
