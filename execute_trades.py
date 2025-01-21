@@ -113,7 +113,7 @@ def open_sell_positions(mt5, symbol, supply_zones, max_positions=5):
     should_trade = False
     zone_price = None
     
-    if market_condition == "BEARISH" and trend_strength > 0.5:
+    if market_condition == "BEARISH" and trend_strength > 0.4:
         # Strong bearish trend - we can trade even without supply zone
         should_trade = True
         zone_price = bid_price
@@ -128,7 +128,7 @@ def open_sell_positions(mt5, symbol, supply_zones, max_positions=5):
         # Dynamic SL based on trend strength
         sl_pips = max(100, int(100 * (1 + trend_strength)))
         sl_price = bid_price + sl_pips * point
-        tp_price = bid_price - (sl_pips * 1.5) * point  # 1.5 risk:reward ratio
+        tp_price = bid_price - (sl_pips * 1.3) * point  # 1.5 risk:reward ratio
         
         # Calculate position size based on risk management
         volume = calculate_position_size(mt5, symbol, risk_percent=1.0, sl_pips=sl_pips)
@@ -186,7 +186,7 @@ def open_buy_positions(mt5, symbol, demand_zones, max_positions=5):
     should_trade = False
     zone_price = None
     
-    if market_condition == "BULLISH" and trend_strength > 0.5:
+    if market_condition == "BULLISH" and trend_strength > 0.4:
         # Strong bullish trend - we can trade even without demand zone
         should_trade = True
         zone_price = ask_price
@@ -201,7 +201,7 @@ def open_buy_positions(mt5, symbol, demand_zones, max_positions=5):
         # Dynamic SL based on trend strength
         sl_pips = max(100, int(100 * (1 + trend_strength)))
         sl_price = ask_price - sl_pips * point
-        tp_price = ask_price + (sl_pips * 1.5) * point  # 1.5 risk:reward ratio
+        tp_price = ask_price + (sl_pips * 1.3) * point  # 1.5 risk:reward ratio
         
         # Calculate position size based on risk management
         volume = calculate_position_size(mt5, symbol, risk_percent=1.0, sl_pips=sl_pips)
