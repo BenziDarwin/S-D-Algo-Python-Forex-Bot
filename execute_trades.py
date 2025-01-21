@@ -1,16 +1,32 @@
+import numpy as np
+import pandas as pd
 from dotenv import load_dotenv
 import os
 
-# Load environment variables from .env file
 load_dotenv()
 
+# Validate and get environment variables
+def get_env_var(var_name, var_type, default_value=None):
+    """Retrieve and validate environment variable."""
+    value = os.getenv(var_name, default_value)
+    if value is None:
+        raise ValueError(f"Environment variable '{var_name}' is missing.")
+    
+    try:
+        return var_type(value)
+    except ValueError:
+        raise ValueError(f"Environment variable '{var_name}' must be of type {var_type.__name__}. Got: {value}")
+
 # Get configurable variables
-RISK_PERCENT = float(os.getenv('RISK_PERCENT'))
-SL_PIPS = int(os.getenv('SL_PIPS'))
-IMPACT_THRESHOLD_PIPS = int(os.getenv('IMPACT_THRESHOLD_PIPS'))
-STRONG_TREND_THRESHOLD = float(os.getenv('STRONG_TREND_THRESHOLD'))
-MAX_POSITIONS = int(os.getenv('MAX_POSITIONS'))
-MAGIC_NUMBER = int(os.getenv('MAGIC_NUMBER'))
+RISK_PERCENT = get_env_var('RISK_PERCENT', float)
+SL_PIPS = get_env_var('SL_PIPS', int)
+IMPACT_THRESHOLD_PIPS = get_env_var('IMPACT_THRESHOLD_PIPS', int)
+STRONG_TREND_THRESHOLD = get_env_var('STRONG_TREND_THRESHOLD', float)
+MAX_POSITIONS = get_env_var('MAX_POSITIONS', int)
+MAGIC_NUMBER = get_env_var('MAGIC_NUMBER', int)
+MIN_POSITION_SIZE = get_env_var('MIN_POSITION_SIZE', float)
+REWARD_RISK_RATIO = get_env_var('REWARD_RISK_RATIO', float)
+
 
 def check_news_impact(mt5, symbol, impact_threshold_pips=IMPACT_THRESHOLD_PIPS):
     """
@@ -35,9 +51,6 @@ def get_market_condition(mt5, symbol, period=15, lookback=20):
     if rates is None:
         print("Failed to get historical data")
         return "RANGING", 0
-    
-    import numpy as np
-    import pandas as pd
     
     df = pd.DataFrame(rates)
     # Calculate EMAs
@@ -83,7 +96,7 @@ def calculate_position_size(mt5, symbol, risk_percent=RISK_PERCENT, sl_pips=SL_P
     """
     account_info = mt5.account_info()
     if account_info is None:
-        return 0.05  # Minimum position size if we can't get account info
+        return MIN_POSITION_SIZE  # Minimum position size if we can't get account info
         
     point = mt5.symbol_info(symbol).point
     tick_value = mt5.symbol_info(symbol).trade_tick_value
@@ -96,7 +109,7 @@ def calculate_position_size(mt5, symbol, risk_percent=RISK_PERCENT, sl_pips=SL_P
     position_size = risk_amount / sl_amount
     
     # Round down to nearest 0.05
-    position_size = round(max(position_size, 0.05), 2)
+    position_size = round(max(position_size, MIN_POSITION_SIZE), 2)
     return position_size
 
 def open_sell_positions(mt5, symbol, supply_zones, max_positions=MAX_POSITIONS):
@@ -138,7 +151,7 @@ def open_sell_positions(mt5, symbol, supply_zones, max_positions=MAX_POSITIONS):
         # Dynamic SL based on trend strength
         sl_pips = max(100, int(100 * (1 + trend_strength)))
         sl_price = bid_price + sl_pips * point
-        tp_price = bid_price - (sl_pips * 1.3) * point  # 1.5 risk:reward ratio
+        tp_price = bid_price - (sl_pips * REWARD_RISK_RATIO) * point  # 1.3 risk:reward ratio
         
         # Calculate position size based on risk management
         volume = calculate_position_size(mt5, symbol, risk_percent=RISK_PERCENT, sl_pips=sl_pips)
@@ -159,7 +172,7 @@ def open_sell_positions(mt5, symbol, supply_zones, max_positions=MAX_POSITIONS):
             "sl": sl_price,
             "tp": tp_price,
             "deviation": 10,
-            "magic": 234000,
+            "magic": MAGIC_NUMBER,
             "comment": f"Sell order - {market_condition} market",
             "type_time": mt5.ORDER_TIME_GTC
         }
@@ -211,7 +224,7 @@ def open_buy_positions(mt5, symbol, demand_zones, max_positions=MAX_POSITIONS):
         # Dynamic SL based on trend strength
         sl_pips = max(100, int(100 * (1 + trend_strength)))
         sl_price = ask_price - sl_pips * point
-        tp_price = ask_price + (sl_pips * 1.3) * point  # 1.5 risk:reward ratio
+        tp_price = ask_price + (sl_pips * REWARD_RISK_RATIO) * point  # 1.3 risk:reward ratio
         
         # Calculate position size based on risk management
         volume = calculate_position_size(mt5, symbol, risk_percent=RISK_PERCENT, sl_pips=sl_pips)
@@ -232,7 +245,7 @@ def open_buy_positions(mt5, symbol, demand_zones, max_positions=MAX_POSITIONS):
             "sl": sl_price,
             "tp": tp_price,
             "deviation": 10,
-            "magic": 234000,
+            "magic": MAGIC_NUMBER,
             "comment": f"Buy order - {market_condition} market",
             "type_time": mt5.ORDER_TIME_GTC
         }
