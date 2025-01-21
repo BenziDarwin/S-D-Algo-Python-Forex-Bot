@@ -61,7 +61,7 @@ def main():
 
             
                 # Wait for 10 seconds before checking again
-                time.sleep(10)
+                time.sleep(300)
         finally:
             mt5.shutdown()
     elif MODE == 'mock':
