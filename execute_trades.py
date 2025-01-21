@@ -72,7 +72,7 @@ def calculate_position_size(mt5, symbol, risk_percent=1.0, sl_pips=100):
     """
     account_info = mt5.account_info()
     if account_info is None:
-        return 0.01  # Minimum position size if we can't get account info
+        return 0.05  # Minimum position size if we can't get account info
         
     point = mt5.symbol_info(symbol).point
     tick_value = mt5.symbol_info(symbol).trade_tick_value
@@ -84,8 +84,8 @@ def calculate_position_size(mt5, symbol, risk_percent=1.0, sl_pips=100):
     sl_amount = sl_pips * point * (tick_value / point)
     position_size = risk_amount / sl_amount
     
-    # Round down to nearest 0.01
-    position_size = round(max(position_size, 0.01), 2)
+    # Round down to nearest 0.05
+    position_size = round(max(position_size, 0.05), 2)
     return position_size
 
 def open_sell_positions(mt5, symbol, supply_zones, max_positions=5):
