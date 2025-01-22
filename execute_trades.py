@@ -3,9 +3,10 @@ import pandas as pd
 from dotenv import load_dotenv
 import os
 
+from zones import combine_nearby_zones, Zone
+
 load_dotenv()
 
-# Validate and get environment variables
 def get_env_var(var_name, var_type, default_value=None):
     """Retrieve and validate environment variable."""
     value = os.getenv(var_name, default_value)
@@ -15,26 +16,22 @@ def get_env_var(var_name, var_type, default_value=None):
     try:
         return var_type(value)
     except ValueError:
-        raise ValueError(f"Environment variable '{var_name}' must be of type {var_type.__name__}. Got: {value}")
+        raise ValueError(f"Environment variable '{var_name}' must be type {var_type.__name__}. Got: {value}")
 
-# Get configurable variables
+# Configuration variables
 RISK_PERCENT = get_env_var('RISK_PERCENT', float)
-SL_PIPS = get_env_var('SL_PIPS', int)
-IMPACT_THRESHOLD_PIPS = get_env_var('IMPACT_THRESHOLD_PIPS', int)
-STRONG_TREND_THRESHOLD = get_env_var('STRONG_TREND_THRESHOLD', float)
-MAX_POSITIONS = get_env_var('MAX_POSITIONS', int)
-MAGIC_NUMBER = get_env_var('MAGIC_NUMBER', int)
 MIN_POSITION_SIZE = get_env_var('MIN_POSITION_SIZE', float)
 REWARD_RISK_RATIO = get_env_var('REWARD_RISK_RATIO', float)
-
+MAX_POSITIONS = get_env_var('MAX_POSITIONS', int)
+MAGIC_NUMBER = get_env_var('MAGIC_NUMBER', int)
+ZONE_BUFFER_PIPS = get_env_var('ZONE_BUFFER_PIPS', int, 10)
+IMPACT_THRESHOLD_PIPS = get_env_var('IMPACT_THRESHOLD_PIPS', int)
 
 def check_news_impact(mt5, symbol, impact_threshold_pips=IMPACT_THRESHOLD_PIPS):
-    """
-    Check for unusual price movements that might indicate news impact
-    """
+    """Check for unusual price movements that might indicate high volatility"""
     rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, 2)
     if rates is None:
-        return True  # Assume high volatility if we can't get data
+        return True
         
     price_change = abs(rates[-1]['close'] - rates[-1]['open'])
     point = mt5.symbol_info(symbol).point
@@ -42,239 +39,173 @@ def check_news_impact(mt5, symbol, impact_threshold_pips=IMPACT_THRESHOLD_PIPS):
     
     return price_change_pips > impact_threshold_pips
 
-def get_market_condition(mt5, symbol, period=15, lookback=20):
-    """
-    Determine if market is bullish, bearish, or ranging using EMA and RSI
-    Returns: (condition, strength)
-    """
-    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, lookback + 14)
-    if rates is None:
-        print("Failed to get historical data")
-        return "RANGING", 0
-    
-    df = pd.DataFrame(rates)
-    # Calculate EMAs
-    df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
-    df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
-    
-    # Calculate RSI
-    delta = df['close'].diff()
-    gains = delta.where(delta > 0, 0)
-    losses = -delta.where(delta < 0, 0)
-    
-    avg_gains = gains.rolling(window=14).mean()
-    avg_losses = losses.rolling(window=14).mean()
-    
-    rs = avg_gains / avg_losses.replace(0, np.inf)
-    df['rsi'] = 100 - (100 / (1 + rs))
-    df['rsi'] = df['rsi'].fillna(50)
-    
-    # Calculate trend strength using both price action and EMAs
-    price_change = (df['close'].iloc[-1] - df['close'].iloc[0]) / df['close'].iloc[0] * 100
-    ema_spread = ((df['ema20'].iloc[-1] - df['ema50'].iloc[-1]) / df['ema50'].iloc[-1]) * 100
-    current_rsi = float(df['rsi'].iloc[-1])
-    
-    # Check EMA crossover and direction
-    ema_bullish = df['ema20'].iloc[-1] > df['ema50'].iloc[-1] and price_change > 0
-    ema_bearish = df['ema20'].iloc[-1] < df['ema50'].iloc[-1] and price_change < 0
-    
-    price_volatility = df['close'].std() / df['close'].mean()
-    is_choppy = abs(ema_spread) < 0.1  # EMAs are very close together
-    
-    # Modified condition check
-    if ema_bullish and not is_choppy:
-        if current_rsi > 70:
-            strength *= 0.5
-        return "BULLISH", strength
-    elif ema_bearish and not is_choppy:
-        if current_rsi < 30:
-            strength *= 0.5
-        return "BEARISH", strength
-    else:
-        # Calculate ranging strength based on volatility
-        ranging_strength = min(price_volatility * 100, 1.0)
-        return "RANGING", ranging_strength
-
-
-def calculate_position_size(mt5, symbol, risk_percent=RISK_PERCENT, sl_pips=SL_PIPS):
-    """
-    Calculate position size based on account risk management
-    """
+def calculate_position_size(mt5, symbol, risk_percent=RISK_PERCENT, sl_pips=None):
+    """Calculate position size based on account risk management"""
     account_info = mt5.account_info()
     if account_info is None:
-        return MIN_POSITION_SIZE  # Minimum position size if we can't get account info
+        return MIN_POSITION_SIZE
         
     point = mt5.symbol_info(symbol).point
     tick_value = mt5.symbol_info(symbol).trade_tick_value
     
-    # Calculate risk amount in account currency
     risk_amount = account_info.balance * (risk_percent / 100)
     
-    # Calculate position size based on risk
     sl_amount = sl_pips * point * (tick_value / point)
     position_size = risk_amount / sl_amount
     
-    # Round down to nearest 0.05
     position_size = round(max(position_size, MIN_POSITION_SIZE), 2)
     return position_size
 
-def open_sell_positions(mt5, symbol, supply_zones, max_positions=MAX_POSITIONS):
+from typing import List
+
+def open_sell_positions(mt5, symbol: str, supply_zones: List[Zone], sell_liquidity: List[Zone], max_positions=MAX_POSITIONS):
+    """Open sell positions based on the most recent supply or sell liquidity zone using bid price."""
     if check_news_impact(mt5, symbol):
-        print("High volatility detected - avoiding new positions")
+        print("High volatility detected - avoiding new positions.")
         return
-    
-    market_condition, trend_strength = get_market_condition(mt5, symbol)
-    
-    # Don't open sell positions in bullish market
-    if market_condition == "BULLISH":
-        print(f"Avoiding sell positions in {market_condition} market")
-        return
-    
-    open_positions = [pos for pos in list(mt5.positions_get(symbol=symbol)) if pos.type == mt5.ORDER_TYPE_SELL]
+
+    open_positions = [
+        pos for pos in mt5.positions_get(symbol=symbol) if pos.type == mt5.ORDER_TYPE_SELL
+    ]
     if len(open_positions) >= max_positions:
-        print(f"Maximum of {max_positions} positions already open.")
+        print(f"Maximum of {max_positions} sell positions already open.")
         return
 
     tick = mt5.symbol_info_tick(symbol)
-    if tick is None:
-        print("Failed to get current price")
+    if not tick:
+        print("Failed to retrieve current price.")
         return
+
     bid_price = tick.bid
+    point = mt5.symbol_info(symbol).point
+
+    # Combine zones and use the most recent one
+    all_zones = combine_nearby_zones(supply_zones + sell_liquidity)
+    if not all_zones:
+        print("No valid supply or sell liquidity zones available.")
+        return
+
+    recent_zone = max(all_zones, key=lambda z: z.timestamp)  # Most recent zone
+
+    if bid_price < recent_zone.price:
+        print(f"Current bid price {bid_price} is below the sell zone at {recent_zone.price}. Skipping trade.")
+        return
     
-    # Only trade if we have a bearish trend or valid supply zone
-    should_trade = False
+    entry_price = bid_price  # Use current bid price
+    sl_price = recent_zone.price + (ZONE_BUFFER_PIPS * point)
+    tp_price = entry_price - ((sl_price - entry_price) * REWARD_RISK_RATIO)
 
-    trend_threshold = STRONG_TREND_THRESHOLD * 0.6 if market_condition == "BEARISH" else STRONG_TREND_THRESHOLD
-    
-    zone_distance = abs(bid_price - supply_zones[-1][1]) / mt5.symbol_info(symbol).point
-    if market_condition == "BEARISH" and trend_strength > trend_threshold:
-        should_trade = True
-        zone_price = bid_price
+    # Ensure no duplicate positions near the entry price
+    if any(abs(pos.price_open - entry_price) < (5 * point) for pos in open_positions):
+        print(f"Sell position already exists near the most recent zone at {recent_zone.price}.")
+        return
 
-    elif market_condition == "RANGING":
-        if zone_distance > IMPACT_THRESHOLD_PIPS * 1.5:
-            should_trade = True
-            zone_price = supply_zones[-1][1]
-            print(f"Opening sell position in ranging market - supply zone found at distance: {zone_distance:.1f} pips")
-        else:
-            print(f"Ranging market - supply zone too close at {zone_distance:.1f} pips")
+    # Calculate position size
+    volume = calculate_position_size(mt5, symbol, risk_percent=RISK_PERCENT, sl_pips=(sl_price - entry_price) / point)
+    if volume <= 0:
+        print("Position size calculation resulted in zero or negative volume.")
+        return
 
-    
-    if should_trade and not any(pos.price_open == bid_price for pos in open_positions):
-        point = mt5.symbol_info(symbol).point
-        
-        # Dynamic SL based on trend strength
-        sl_pips = max(100, int(100 * (1 + trend_strength)))
-        sl_price = bid_price + sl_pips * point
-        tp_price = bid_price - (sl_pips * REWARD_RISK_RATIO) * point  # 1.3 risk:reward ratio
-        
-        # Calculate position size based on risk management
-        volume = calculate_position_size(mt5, symbol, risk_percent=RISK_PERCENT, sl_pips=sl_pips)
+    # Check margin requirements
+    margin_needed = mt5.order_calc_margin(mt5.ORDER_TYPE_SELL, symbol, volume, entry_price)
+    account_info = mt5.account_info()
+    if not account_info or account_info.margin_free < margin_needed:
+        print("Insufficient margin to open sell order.")
+        return
 
-        # Check if there are enough funds
-        margin_needed = mt5.order_calc_margin(mt5.ORDER_TYPE_SELL, symbol, volume, bid_price)
-        account_info = mt5.account_info()
-        if margin_needed is None or account_info.margin_free < margin_needed:
-            print("Not enough money to open sell order.")
-            return
-
-        request = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": symbol,
-            "volume": volume,
-            "type": mt5.ORDER_TYPE_SELL,
-            "price": bid_price,
-            "sl": sl_price,
-            "tp": tp_price,
-            "deviation": 10,
-            "magic": MAGIC_NUMBER,
-            "comment": f"Sell order - {market_condition} market",
-            "type_time": mt5.ORDER_TIME_GTC
-        }
-        result = mt5.order_send(request)
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
-            print(f"Failed to open sell order. Retcode: {result.retcode}")
-        else:
-            print(f"Opened sell order at {bid_price} ({market_condition} market, strength: {trend_strength:.2f})")
+    request = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": symbol,
+        "volume": volume,
+        "type": mt5.ORDER_TYPE_SELL,
+        "price": entry_price,
+        "sl": sl_price,
+        "tp": tp_price,
+        "deviation": 10,
+        "magic": MAGIC_NUMBER,
+        "comment": f"Sell order at zone {recent_zone.type}",
+        "type_time": mt5.ORDER_TIME_GTC
+    }
+    result = mt5.order_send(request)
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        print(f"Failed to open sell order. Retcode: {result.retcode}")
     else:
-        print(f"Waiting for better sell conditions. Market: {market_condition}, Strength: {trend_strength:.2f}")
+        print(f"Sell order opened at {entry_price}. SL: {sl_price}, TP: {tp_price}, Volume: {volume}")
 
-def open_buy_positions(mt5, symbol, demand_zones, max_positions=MAX_POSITIONS):
+
+def open_buy_positions(mt5, symbol: str, demand_zones: List[Zone], buy_liquidity: List[Zone], max_positions=MAX_POSITIONS):
+    """Open buy positions based on the most recent demand or buy liquidity zone using ask price."""
     if check_news_impact(mt5, symbol):
-        print("High volatility detected - avoiding new positions")
+        print("High volatility detected - avoiding new positions.")
         return
-    
-    market_condition, trend_strength = get_market_condition(mt5, symbol)
-    
-    # Don't open buy positions in bearish market
-    if market_condition == "BEARISH":
-        print(f"Avoiding buy positions in {market_condition} market")
-        return
-    
-    open_positions = [pos for pos in list(mt5.positions_get(symbol=symbol)) if pos.type == mt5.ORDER_TYPE_BUY]
+
+    open_positions = [
+        pos for pos in mt5.positions_get(symbol=symbol) if pos.type == mt5.ORDER_TYPE_BUY
+    ]
     if len(open_positions) >= max_positions:
-        print(f"Maximum of {max_positions} positions already open.")
+        print(f"Maximum of {max_positions} buy positions already open.")
         return
 
     tick = mt5.symbol_info_tick(symbol)
-    if tick is None:
-        print("Failed to get current price")
+    if not tick:
+        print("Failed to retrieve current price.")
         return
+
     ask_price = tick.ask
+    point = mt5.symbol_info(symbol).point
     
-    # Only trade if we have a bullish trend or valid demand zone
-    should_trade = False
+        # Combine zones and use the most recent one
+    all_zones = combine_nearby_zones(demand_zones + buy_liquidity)
+    if not all_zones:
+        print("No valid demand or buy liquidity zones available.")
+        return
     
-    trend_threshold = STRONG_TREND_THRESHOLD * 0.6 if market_condition == "BULLISH" else STRONG_TREND_THRESHOLD
-    zone_distance = abs(ask_price - demand_zones[-1][1]) / mt5.symbol_info(symbol).point
+    recent_zone = max(all_zones, key=lambda z: z.timestamp)  # Most recent zone
 
-    if market_condition == "BULLISH" and trend_strength > trend_threshold:
-        should_trade = True
-        zone_price = ask_price
+    if ask_price > recent_zone.price:
+        print(f"Current ask price {ask_price} is above the buy zone at {recent_zone.price}. Skipping trade.")
+        return
     
-    elif market_condition == "RANGING":
-        if zone_distance > IMPACT_THRESHOLD_PIPS * 1.5:
-            should_trade = True
-            zone_price = demand_zones[-1][1]
-            print(f"Opening buy position in ranging market - demand zone found at distance: {zone_distance:.1f} pips")
-        else:
-            print(f"Ranging market - demand zone too close at {zone_distance:.1f} pips")
-    
-    if should_trade and not any(pos.price_open == ask_price for pos in open_positions):
-        point = mt5.symbol_info(symbol).point
-        
-        # Dynamic SL based on trend strength
-        sl_pips = max(100, int(100 * (1 + trend_strength)))
-        sl_price = ask_price - sl_pips * point
-        tp_price = ask_price + (sl_pips * REWARD_RISK_RATIO) * point  # 1.3 risk:reward ratio
-        
-        # Calculate position size based on risk management
-        volume = calculate_position_size(mt5, symbol, risk_percent=RISK_PERCENT, sl_pips=sl_pips)
 
-        # Check if there are enough funds
-        margin_needed = mt5.order_calc_margin(mt5.ORDER_TYPE_BUY, symbol, volume, ask_price)
-        account_info = mt5.account_info()
-        if margin_needed is None or account_info.margin_free < margin_needed:
-            print("Not enough money to open buy order.")
-            return
 
-        request = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": symbol,
-            "volume": volume,
-            "type": mt5.ORDER_TYPE_BUY,
-            "price": ask_price,
-            "sl": sl_price,
-            "tp": tp_price,
-            "deviation": 10,
-            "magic": MAGIC_NUMBER,
-            "comment": f"Buy order - {market_condition} market",
-            "type_time": mt5.ORDER_TIME_GTC
-        }
-        result = mt5.order_send(request)
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
-            print(f"Failed to open buy order. Retcode: {result.retcode}")
-        else:
-            print(f"Opened buy order at {ask_price} ({market_condition} market, strength: {trend_strength:.2f})")
+    entry_price = ask_price  # Use current ask price
+    sl_price = recent_zone.price - (ZONE_BUFFER_PIPS * point)
+    tp_price = entry_price + ((entry_price - sl_price) * REWARD_RISK_RATIO)
+
+    # Ensure no duplicate positions near the entry price
+    if any(abs(pos.price_open - entry_price) < (5 * point) for pos in open_positions):
+        print(f"Buy position already exists near the most recent zone at {recent_zone.price}.")
+        return
+
+    # Calculate position size
+    volume = calculate_position_size(mt5, symbol, risk_percent=RISK_PERCENT, sl_pips=(entry_price - sl_price) / point)
+    if volume <= 0:
+        print("Position size calculation resulted in zero or negative volume.")
+        return
+
+    # Check margin requirements
+    margin_needed = mt5.order_calc_margin(mt5.ORDER_TYPE_BUY, symbol, volume, entry_price)
+    account_info = mt5.account_info()
+    if not account_info or account_info.margin_free < margin_needed:
+        print("Insufficient margin to open buy order.")
+        return
+
+    request = {
+        "action": mt5.TRADE_ACTION_DEAL,
+        "symbol": symbol,
+        "volume": volume,
+        "type": mt5.ORDER_TYPE_BUY,
+        "price": entry_price,
+        "sl": sl_price,
+        "tp": tp_price,
+        "deviation": 10,
+        "magic": MAGIC_NUMBER,
+        "comment": f"Buy order at zone {recent_zone.type}",
+        "type_time": mt5.ORDER_TIME_GTC
+    }
+    result = mt5.order_send(request)
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        print(f"Failed to open buy order. Retcode: {result.retcode}")
     else:
-        print(f"Waiting for better buy conditions. Market: {market_condition}, Strength: {trend_strength:.2f}")
+        print(f"Buy order opened at {entry_price}. SL: {sl_price}, TP: {tp_price}, Volume: {volume}")
+

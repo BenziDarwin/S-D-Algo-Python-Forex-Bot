@@ -1,7 +1,7 @@
 import time
 import MetaTrader5 as mt5
 import pandas as pd
-from zones import find_zones
+from zones import find_all_zones
 from execute_trades import open_sell_positions, open_buy_positions
 from mock_execute_trades import mock_open_sell_positions, mock_open_buy_positions
 
@@ -49,15 +49,16 @@ def main():
                 df = pd.DataFrame(rates)
                 df['time'] = pd.to_datetime(df['time'], unit='s')
                 df.set_index('time', inplace=True)
+                print(df)
 
                 # Find supply and demand zones
-                supply_zones, demand_zones = find_zones(df)
+                supply_zones, demand_zones, buy_liquidity, sell_liquidity = find_all_zones(df)
 
                 print("Processing live data...")
 
                 # Execute live trades
-                open_sell_positions(mt5, symbol, supply_zones)
-                open_buy_positions(mt5, symbol, demand_zones)
+                open_sell_positions(mt5, symbol, supply_zones, sell_liquidity)
+                open_buy_positions(mt5, symbol, demand_zones, buy_liquidity)
 
             
                 # Wait for 10 seconds before checking again
@@ -88,7 +89,7 @@ def main():
         df.set_index('time', inplace=True)
 
         # Find supply and demand zones
-        supply_zones, demand_zones = find_zones(df)
+        supply_zones, demand_zones, buy_liquidity, sell_liquidity = find_all_zones(df)
         
         # Loop through each row of the DataFrame
         for index, row in df.iterrows():
