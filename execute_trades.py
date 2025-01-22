@@ -24,7 +24,7 @@ MIN_POSITION_SIZE = get_env_var('MIN_POSITION_SIZE', float)
 REWARD_RISK_RATIO = get_env_var('REWARD_RISK_RATIO', float)
 MAX_POSITIONS = get_env_var('MAX_POSITIONS', int)
 MAGIC_NUMBER = get_env_var('MAGIC_NUMBER', int)
-ZONE_BUFFER_PIPS = get_env_var('ZONE_BUFFER_PIPS', int, 10)
+SL_PIPS = get_env_var('SL_PIPS', int)
 IMPACT_THRESHOLD_PIPS = get_env_var('IMPACT_THRESHOLD_PIPS', int)
 
 def check_news_impact(mt5, symbol, impact_threshold_pips=IMPACT_THRESHOLD_PIPS):
@@ -92,8 +92,8 @@ def open_sell_positions(mt5, symbol: str, supply_zones: List[Zone], sell_liquidi
         return
     
     entry_price = bid_price  # Use current bid price
-    sl_price = recent_zone.price + (ZONE_BUFFER_PIPS * point)
-    tp_price = entry_price - ((sl_price - entry_price) * REWARD_RISK_RATIO)
+    sl_price = round(recent_zone.price + (SL_PIPS * point),5)
+    tp_price = round(entry_price - ((sl_price - entry_price) * REWARD_RISK_RATIO),5)
 
     # Ensure no duplicate positions near the entry price
     if any(abs(pos.price_open - entry_price) < (5 * point) for pos in open_positions):
@@ -169,8 +169,8 @@ def open_buy_positions(mt5, symbol: str, demand_zones: List[Zone], buy_liquidity
 
 
     entry_price = ask_price  # Use current ask price
-    sl_price = recent_zone.price - (ZONE_BUFFER_PIPS * point)
-    tp_price = entry_price + ((entry_price - sl_price) * REWARD_RISK_RATIO)
+    sl_price = round(recent_zone.price - (SL_PIPS * point),5)
+    tp_price = round(entry_price + ((entry_price - sl_price) * REWARD_RISK_RATIO),5)
 
     # Ensure no duplicate positions near the entry price
     if any(abs(pos.price_open - entry_price) < (5 * point) for pos in open_positions):
