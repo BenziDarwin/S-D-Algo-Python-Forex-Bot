@@ -78,19 +78,22 @@ def get_market_condition(mt5, symbol, period=15, lookback=20):
     ema_bullish = df['ema20'].iloc[-1] > df['ema50'].iloc[-1] and price_change > 0
     ema_bearish = df['ema20'].iloc[-1] < df['ema50'].iloc[-1] and price_change < 0
     
-    # Calculate strength incorporating both price change and EMA spread
-    strength = (abs(price_change) + abs(ema_spread)) / 2
+    price_volatility = df['close'].std() / df['close'].mean()
+    is_choppy = abs(ema_spread) < 0.1  # EMAs are very close together
     
-    if ema_bullish:
+    # Modified condition check
+    if ema_bullish and not is_choppy:
         if current_rsi > 70:
-            strength *= 0.5  # Reduce strength if overbought
+            strength *= 0.5
         return "BULLISH", strength
-    elif ema_bearish:
+    elif ema_bearish and not is_choppy:
         if current_rsi < 30:
-            strength *= 0.5  # Reduce strength if oversold
+            strength *= 0.5
         return "BEARISH", strength
     else:
-        return "RANGING", 0
+        # Calculate ranging strength based on volatility
+        ranging_strength = min(price_volatility * 100, 1.0)
+        return "RANGING", ranging_strength
 
 
 def calculate_position_size(mt5, symbol, risk_percent=RISK_PERCENT, sl_pips=SL_PIPS):
@@ -143,15 +146,19 @@ def open_sell_positions(mt5, symbol, supply_zones, max_positions=MAX_POSITIONS):
 
     trend_threshold = STRONG_TREND_THRESHOLD * 0.6 if market_condition == "BEARISH" else STRONG_TREND_THRESHOLD
     
+    zone_distance = abs(bid_price - supply_zones[-1][1]) / mt5.symbol_info(symbol).point
     if market_condition == "BEARISH" and trend_strength > trend_threshold:
         should_trade = True
         zone_price = bid_price
-    elif market_condition != "BULLISH" and supply_zones and bid_price > supply_zones[-1][1]:
-        # Require stronger zone confirmation for counter-trend trades
-        zone_distance = abs(bid_price - supply_zones[-1][1]) / mt5.symbol_info(symbol).point
-        if market_condition == "RANGING" or zone_distance > IMPACT_THRESHOLD_PIPS * 1.5:
+
+    elif market_condition == "RANGING":
+        if zone_distance > IMPACT_THRESHOLD_PIPS * 1.5:
             should_trade = True
             zone_price = supply_zones[-1][1]
+            print(f"Opening sell position in ranging market - supply zone found at distance: {zone_distance:.1f} pips")
+        else:
+            print(f"Ranging market - supply zone too close at {zone_distance:.1f} pips")
+
     
     if should_trade and not any(pos.price_open == bid_price for pos in open_positions):
         point = mt5.symbol_info(symbol).point
@@ -219,16 +226,19 @@ def open_buy_positions(mt5, symbol, demand_zones, max_positions=MAX_POSITIONS):
     should_trade = False
     
     trend_threshold = STRONG_TREND_THRESHOLD * 0.6 if market_condition == "BULLISH" else STRONG_TREND_THRESHOLD
-    
+    zone_distance = abs(ask_price - demand_zones[-1][1]) / mt5.symbol_info(symbol).point
+
     if market_condition == "BULLISH" and trend_strength > trend_threshold:
         should_trade = True
         zone_price = ask_price
-    elif market_condition != "BEARISH" and demand_zones and ask_price < demand_zones[-1][1]:
-        # Require stronger zone confirmation for counter-trend trades
-        zone_distance = abs(ask_price - demand_zones[-1][1]) / mt5.symbol_info(symbol).point
-        if market_condition == "RANGING" or zone_distance > IMPACT_THRESHOLD_PIPS * 1.5:
+    
+    elif market_condition == "RANGING":
+        if zone_distance > IMPACT_THRESHOLD_PIPS * 1.5:
             should_trade = True
             zone_price = demand_zones[-1][1]
+            print(f"Opening buy position in ranging market - demand zone found at distance: {zone_distance:.1f} pips")
+        else:
+            print(f"Ranging market - demand zone too close at {zone_distance:.1f} pips")
     
     if should_trade and not any(pos.price_open == ask_price for pos in open_positions):
         point = mt5.symbol_info(symbol).point
