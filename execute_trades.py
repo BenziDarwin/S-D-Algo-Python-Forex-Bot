@@ -47,7 +47,7 @@ def get_market_condition(mt5, symbol, period=15, lookback=20):
     Determine if market is bullish, bearish, or ranging using EMA and RSI
     Returns: (condition, strength)
     """
-    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, lookback + 14)  # Extra data for RSI
+    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, lookback + 14)
     if rates is None:
         print("Failed to get historical data")
         return "RANGING", 0
@@ -57,38 +57,41 @@ def get_market_condition(mt5, symbol, period=15, lookback=20):
     df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
     df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
     
-    # Calculate RSI with error handling
+    # Calculate RSI
     delta = df['close'].diff()
     gains = delta.where(delta > 0, 0)
     losses = -delta.where(delta < 0, 0)
     
-    # Calculate average gains and losses
     avg_gains = gains.rolling(window=14).mean()
     avg_losses = losses.rolling(window=14).mean()
     
-    # Calculate RS with handling for zero division
     rs = avg_gains / avg_losses.replace(0, np.inf)
     df['rsi'] = 100 - (100 / (1 + rs))
-    
-    # Handle any potential NaN values
     df['rsi'] = df['rsi'].fillna(50)
     
-    # Calculate trend strength
+    # Calculate trend strength using both price action and EMAs
     price_change = (df['close'].iloc[-1] - df['close'].iloc[0]) / df['close'].iloc[0] * 100
-    current_rsi = float(df['rsi'].iloc[-1])  # Convert to float to avoid comparison issues
+    ema_spread = ((df['ema20'].iloc[-1] - df['ema50'].iloc[-1]) / df['ema50'].iloc[-1]) * 100
+    current_rsi = float(df['rsi'].iloc[-1])
     
-    if df['ema20'].iloc[-1] > df['ema50'].iloc[-1]:
-        strength = abs(price_change) if price_change > 0 else 0
+    # Check EMA crossover and direction
+    ema_bullish = df['ema20'].iloc[-1] > df['ema50'].iloc[-1] and price_change > 0
+    ema_bearish = df['ema20'].iloc[-1] < df['ema50'].iloc[-1] and price_change < 0
+    
+    # Calculate strength incorporating both price change and EMA spread
+    strength = (abs(price_change) + abs(ema_spread)) / 2
+    
+    if ema_bullish:
         if current_rsi > 70:
-            strength *= 0.5  # Reduce strength if potentially overbought
+            strength *= 0.5  # Reduce strength if overbought
         return "BULLISH", strength
-    elif df['ema20'].iloc[-1] < df['ema50'].iloc[-1]:
-        strength = abs(price_change) if price_change < 0 else 0
+    elif ema_bearish:
         if current_rsi < 30:
-            strength *= 0.5  # Reduce strength if potentially oversold
+            strength *= 0.5  # Reduce strength if oversold
         return "BEARISH", strength
     else:
         return "RANGING", 0
+
 
 def calculate_position_size(mt5, symbol, risk_percent=RISK_PERCENT, sl_pips=SL_PIPS):
     """
@@ -113,37 +116,42 @@ def calculate_position_size(mt5, symbol, risk_percent=RISK_PERCENT, sl_pips=SL_P
     return position_size
 
 def open_sell_positions(mt5, symbol, supply_zones, max_positions=MAX_POSITIONS):
-    # Check for high volatility/news impact first
     if check_news_impact(mt5, symbol):
         print("High volatility detected - avoiding new positions")
         return
     
-    # Check market conditions
     market_condition, trend_strength = get_market_condition(mt5, symbol)
+    
+    # Don't open sell positions in bullish market
+    if market_condition == "BULLISH":
+        print(f"Avoiding sell positions in {market_condition} market")
+        return
     
     open_positions = [pos for pos in list(mt5.positions_get(symbol=symbol)) if pos.type == mt5.ORDER_TYPE_SELL]
     if len(open_positions) >= max_positions:
         print(f"Maximum of {max_positions} positions already open.")
         return
 
-    # Get current price
     tick = mt5.symbol_info_tick(symbol)
     if tick is None:
         print("Failed to get current price")
         return
     bid_price = tick.bid
     
-    # Determine if we should trade based on both trend and supply zones
+    # Only trade if we have a bearish trend or valid supply zone
     should_trade = False
+
+    trend_threshold = STRONG_TREND_THRESHOLD * 0.6 if market_condition == "BEARISH" else STRONG_TREND_THRESHOLD
     
-    if market_condition == "BEARISH" and trend_strength > STRONG_TREND_THRESHOLD:
-        # Strong bearish trend - we can trade even without supply zone
+    if market_condition == "BEARISH" and trend_strength > trend_threshold:
         should_trade = True
         zone_price = bid_price
-    elif supply_zones and bid_price > supply_zones[-1][1]:
-        # We have a valid supply zone entry
-        should_trade = True
-        zone_price = supply_zones[-1][1]
+    elif market_condition != "BULLISH" and supply_zones and bid_price > supply_zones[-1][1]:
+        # Require stronger zone confirmation for counter-trend trades
+        zone_distance = abs(bid_price - supply_zones[-1][1]) / mt5.symbol_info(symbol).point
+        if market_condition == "RANGING" or zone_distance > IMPACT_THRESHOLD_PIPS * 1.5:
+            should_trade = True
+            zone_price = supply_zones[-1][1]
     
     if should_trade and not any(pos.price_open == bid_price for pos in open_positions):
         point = mt5.symbol_info(symbol).point
@@ -185,38 +193,42 @@ def open_sell_positions(mt5, symbol, supply_zones, max_positions=MAX_POSITIONS):
         print(f"Waiting for better sell conditions. Market: {market_condition}, Strength: {trend_strength:.2f}")
 
 def open_buy_positions(mt5, symbol, demand_zones, max_positions=MAX_POSITIONS):
-    # Check for high volatility/news impact first
     if check_news_impact(mt5, symbol):
         print("High volatility detected - avoiding new positions")
         return
     
-    # Check market conditions
     market_condition, trend_strength = get_market_condition(mt5, symbol)
+    
+    # Don't open buy positions in bearish market
+    if market_condition == "BEARISH":
+        print(f"Avoiding buy positions in {market_condition} market")
+        return
     
     open_positions = [pos for pos in list(mt5.positions_get(symbol=symbol)) if pos.type == mt5.ORDER_TYPE_BUY]
     if len(open_positions) >= max_positions:
         print(f"Maximum of {max_positions} positions already open.")
         return
 
-    # Get current price
     tick = mt5.symbol_info_tick(symbol)
     if tick is None:
         print("Failed to get current price")
         return
     ask_price = tick.ask
     
-    # Determine if we should trade based on both trend and demand zones
+    # Only trade if we have a bullish trend or valid demand zone
     should_trade = False
-    zone_price = None
     
-    if market_condition == "BULLISH" and trend_strength > STRONG_TREND_THRESHOLD:
-        # Strong bullish trend - we can trade even without demand zone
+    trend_threshold = STRONG_TREND_THRESHOLD * 0.6 if market_condition == "BULLISH" else STRONG_TREND_THRESHOLD
+    
+    if market_condition == "BULLISH" and trend_strength > trend_threshold:
         should_trade = True
         zone_price = ask_price
-    elif demand_zones and ask_price < demand_zones[-1][1]:
-        # We have a valid demand zone entry
-        should_trade = True
-        zone_price = demand_zones[-1][1]
+    elif market_condition != "BEARISH" and demand_zones and ask_price < demand_zones[-1][1]:
+        # Require stronger zone confirmation for counter-trend trades
+        zone_distance = abs(ask_price - demand_zones[-1][1]) / mt5.symbol_info(symbol).point
+        if market_condition == "RANGING" or zone_distance > IMPACT_THRESHOLD_PIPS * 1.5:
+            should_trade = True
+            zone_price = demand_zones[-1][1]
     
     if should_trade and not any(pos.price_open == ask_price for pos in open_positions):
         point = mt5.symbol_info(symbol).point
