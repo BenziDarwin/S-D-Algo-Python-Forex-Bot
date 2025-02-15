@@ -1,4 +1,4 @@
-import random
+import secrets
 
 # Mock Data Structures
 class MockPosition:
@@ -27,7 +27,7 @@ def mock_positions_get():
 def mock_order_send(request):
     # Simulate order sending
     print(f"Order request: {request}")
-    return {"retcode": random.choice([0])}  # 0 for success, 1 for failure
+    return {"retcode": secrets.choice([0])}  # 0 for success, 1 for failure
 
 def mock_symbol_info(symbol):
     # Simulate symbol info
@@ -35,7 +35,7 @@ def mock_symbol_info(symbol):
 
 def mock_symbol_info_tick(symbol):
     # Simulate tick info
-    return {"bid": random.uniform(1.0, 1.5), "ask": random.uniform(1.0, 1.5)}
+    return {"bid": secrets.SystemRandom().uniform(1.0, 1.5), "ask": secrets.SystemRandom().uniform(1.0, 1.5)}
 
 def mock_open_sell_positions(symbol, supply_zones, max_positions=5):
     global balance
